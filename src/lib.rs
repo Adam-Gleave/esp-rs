@@ -91,6 +91,22 @@ pub fn parse_cnam(input: &[u8]) -> IResult<&[u8], CNAM> {
 }
 
 #[derive(Debug, PartialEq, Default)]
+pub struct SNAM {
+    pub author: String,
+}
+
+pub fn parse_snam(input: &[u8]) -> IResult<&[u8], SNAM> {
+    let (input, _) = tag("SNAM")(input)?;
+    let (input, _) = take(2u8)(input)?;
+    let (input, snam_data) = take_while(|c: u8| c != 0)(input)?;
+    let (input, _) = tag([0])(input)?;
+
+    Ok((input, SNAM{
+        author: String::from_utf8(snam_data.to_vec()).unwrap(),
+    }))
+}
+
+#[derive(Debug, PartialEq, Default)]
 pub struct TES4 {
     pub size: u32,
     pub flags: TES4Flags,
@@ -100,6 +116,7 @@ pub struct TES4 {
 
     pub hedr: HEDR,
     pub cnam: Option<CNAM>,
+    pub snam: Option<SNAM>,
 }
 
 pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
@@ -118,6 +135,11 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
     } else {
         None
     };
+    let snam_opt = if let Ok((_input, snam)) = parse_snam(input) {
+        Some(snam)
+    } else {
+        None
+    };
 
     Ok((input, TES4{
         size: size,
@@ -128,6 +150,7 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
 
         hedr: hedr,
         cnam: cnam_opt,
+        snam: snam_opt,
     }))
 }
 
