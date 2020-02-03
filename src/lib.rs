@@ -130,16 +130,18 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
     let (input, unknown) = le_u16(input)?;
 
     let (input, hedr) = parse_hedr(input)?;
-    let cnam_opt = if let Ok((_input, cnam)) = parse_cnam(input) {
-        Some(cnam)
+    let (input, cnam_opt) = if let Ok((_input, cnam)) = parse_cnam(input) {
+        (_input, Some(cnam))
     } else {
-        None
+        (input, None)
     };
-    let snam_opt = if let Ok((_input, snam)) = parse_snam(input) {
-        Some(snam)
+    let (input, snam_opt) = if let Ok((_input, snam)) = parse_snam(input) {
+        (_input, Some(snam))
     } else {
-        None
+        (input, None)
     };
+
+    println!("Next 8 bytes: {:x?}", &input[0..8]);
 
     Ok((input, TES4{
         size: size,
