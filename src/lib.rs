@@ -4,6 +4,13 @@ extern crate nom;
 
 use nom::{
     IResult,
+    do_parse,
+    many0,
+    preceded,
+    tag,
+    take,
+    take_while,
+    named,
     bytes::complete::tag,
     bytes::complete::take,
     bytes::complete::take_while,
@@ -12,6 +19,7 @@ use nom::{
     number::complete::le_u8,
     number::complete::le_u16,
     number::complete::le_u32,
+    number::complete::le_u64,
 };
 
 macro_rules! optional_record {
@@ -142,6 +150,25 @@ pub fn parse_intv(input: &[u8]) -> IResult<&[u8], INTV> {
     }))
 }
 
+#[derive(Debug, PartialEq, Default, Clone)]
+pub struct MAST {
+    pub master: String
+}
+
+pub fn parse_mast(input: &[u8]) -> IResult<&[u8], Vec<MAST>> {
+    named!(mast_str, preceded!(take!(2u8), take_while!(|c: u8| c != 0)));
+    named!(mast_rec<&[u8], MAST>, do_parse!(
+        _tag: tag!("MAST") >> master: mast_str >> _spare: tag!([0]) >>
+        _data_tag: tag!("DATA") >> _sz: take!(2u8) >> _zero: le_u64 >> 
+        (MAST {
+            master: String::from_utf8(master.to_vec()).unwrap(),
+        })
+    ));
+    named!(mast_list<&[u8], Vec<MAST>>, many0!(mast_rec));
+
+    Ok(mast_list(input)?)
+}
+
 #[derive(Debug, PartialEq, Default)]
 pub struct TES4 {
     pub size: u32,
@@ -154,6 +181,7 @@ pub struct TES4 {
     pub cnam: Option<CNAM>,
     pub snam: Option<SNAM>,
     pub intv: Option<INTV>,
+    pub mast: Option<Vec<MAST>>,
 }
 
 pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
@@ -170,6 +198,7 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
     let (input, cnam_opt) = optional_record!(CNAM, parse_cnam, input);
     let (input, snam_opt) = optional_record!(SNAM, parse_snam, input);
     let (input, intv_opt) = optional_record!(INTV, parse_intv, input);
+    let (input, mast_opt) = optional_record!(MAST, parse_mast, input);
 
     println!("Next 8 bytes: {:x?}", &input[0..8]);
 
@@ -184,6 +213,7 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
         cnam: cnam_opt,
         snam: snam_opt,
         intv: intv_opt,
+        mast: mast_opt,
     }))
 }
 
@@ -193,7 +223,7 @@ mod tests {
 
     #[test]
     fn header_test() {
-        let data = include_bytes!("../data/Skyrim.esm");
+        let data = include_bytes!("../data/Dawnguard.esm");
 
         if let Ok((_, tes4)) = parse_header(data) {
             println!("{:?}", tes4);
