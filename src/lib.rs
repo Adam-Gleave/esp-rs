@@ -20,6 +20,7 @@ use nom::{
     number::complete::le_u16,
     number::complete::le_u32,
     number::complete::le_u64,
+    multi::count,
 };
 
 macro_rules! optional_record {
@@ -137,22 +138,8 @@ pub fn parse_snam(input: &[u8]) -> IResult<&[u8], SNAM> {
 }
 
 #[derive(Debug, PartialEq, Default)]
-pub struct INTV {
-    pub internal_version: u32,
-}
-
-pub fn parse_intv(input: &[u8]) -> IResult<&[u8], INTV> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("INTV"))?;
-    let (input, internal_version) = le_u32(input)?;
-
-    Ok((input, INTV {
-        internal_version: internal_version,
-    }))
-}
-
-#[derive(Debug, PartialEq, Default, Clone)]
 pub struct MAST {
-    pub master: String
+    pub master: String,
 }
 
 pub fn parse_mast(input: &[u8]) -> IResult<&[u8], Vec<MAST>> {
@@ -170,6 +157,48 @@ pub fn parse_mast(input: &[u8]) -> IResult<&[u8], Vec<MAST>> {
 }
 
 #[derive(Debug, PartialEq, Default)]
+pub struct ONAM {
+    pub overrides: Vec<u32>,
+}
+
+pub fn parse_onam(input: &[u8]) -> IResult<&[u8], ONAM> {
+    let (input, size) = parse_subheader(input, String::from("ONAM"))?;
+    let (input, overrides) = count(le_u32, (size/4) as usize)(input)?;
+
+    Ok((input, ONAM{
+        overrides: overrides,
+    }))
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct INTV {
+    pub internal_version: u32,
+}
+
+pub fn parse_intv(input: &[u8]) -> IResult<&[u8], INTV> {
+    let (input, _) = parse_subheader_ignore_size(input, String::from("INTV"))?;
+    let (input, internal_version) = le_u32(input)?;
+
+    Ok((input, INTV {
+        internal_version: internal_version,
+    }))
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct INCC {
+    pub incc: u32,
+}
+
+pub fn parse_incc(input: &[u8]) -> IResult<&[u8], INCC> {
+    let (input, _) = parse_subheader_ignore_size(input, String::from("INCC"))?;
+    let (input, val) = le_u32(input)?;
+
+    Ok((input, INCC {
+        incc: val,
+    }))
+}
+
+#[derive(Debug, PartialEq, Default)]
 pub struct TES4 {
     pub size: u32,
     pub flags: TES4Flags,
@@ -180,8 +209,10 @@ pub struct TES4 {
     pub hedr: HEDR,
     pub cnam: Option<CNAM>,
     pub snam: Option<SNAM>,
-    pub intv: Option<INTV>,
     pub mast: Option<Vec<MAST>>,
+    pub onam: Option<ONAM>,
+    pub intv: Option<INTV>,
+    pub incc: Option<INCC>,
 }
 
 pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
@@ -197,8 +228,10 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
     let (input, hedr) = parse_hedr(input)?;
     let (input, cnam_opt) = optional_record!(CNAM, parse_cnam, input);
     let (input, snam_opt) = optional_record!(SNAM, parse_snam, input);
-    let (input, intv_opt) = optional_record!(INTV, parse_intv, input);
     let (input, mast_opt) = optional_record!(MAST, parse_mast, input);
+    let (input, onam_opt) = optional_record!(ONAM, parse_onam, input);
+    let (input, intv_opt) = optional_record!(INTV, parse_intv, input);
+    let (input, incc_opt) = optional_record!(INCC, parse_incc, input);
 
     println!("Next 8 bytes: {:x?}", &input[0..8]);
 
@@ -212,8 +245,10 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
         hedr: hedr,
         cnam: cnam_opt,
         snam: snam_opt,
-        intv: intv_opt,
         mast: mast_opt,
+        onam: onam_opt,
+        intv: intv_opt,
+        incc: incc_opt,
     }))
 }
 
@@ -223,7 +258,7 @@ mod tests {
 
     #[test]
     fn header_test() {
-        let data = include_bytes!("../data/Dawnguard.esm");
+        let data = include_bytes!("../data/Update.esm");
 
         if let Ok((_, tes4)) = parse_header(data) {
             println!("{:?}", tes4);
