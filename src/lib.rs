@@ -14,6 +14,18 @@ use nom::{
     number::complete::le_u32,
 };
 
+macro_rules! optional_record {
+    ($record:ty, $parser_fn:ident, $input:expr) => {{
+        let (input, opt) = if let Ok((_input, data)) = $parser_fn($input) {
+            (_input, Some(data))
+        } else {
+            ($input, None)
+        };
+
+        (input, opt)
+    }};
+}
+
 bitflags! {
     #[derive(Default)]
     pub struct TES4Flags: u32 {
@@ -52,6 +64,20 @@ pub fn parse_version_control(input: &[u8]) -> IResult<&[u8], VersionControl> {
     }))
 }
 
+pub fn parse_subheader(input: &[u8], code: String) -> IResult<&[u8], u16> {
+    let (input, _) = tag(code.as_str())(input)?;
+    let (input, size) = le_u16(input)?;
+
+    Ok((input, size))
+}
+
+pub fn parse_subheader_ignore_size(input: &[u8], code: String) -> IResult<&[u8], ()> {
+    let (input, _) = tag(code.as_str())(input)?;
+    let (input, _) = take(2u8)(input)?;
+
+    Ok((input, ()))
+}
+
 #[derive(Debug, PartialEq, Default)]
 pub struct HEDR {
     pub version: f32,
@@ -60,9 +86,7 @@ pub struct HEDR {
 }
 
 pub fn parse_hedr(input: &[u8]) -> IResult<&[u8], HEDR> {
-    let (input, _) = tag("HEDR")(input)?;
-    let (input, _) = take(2u8)(input)?;
-
+    let (input, _) = parse_subheader_ignore_size(input, String::from("HEDR"))?;
     let (input, version) = le_f32(input)?;
     let (input, num_records) = le_i32(input)?;
     let (input, next_obj_id) = le_u32(input)?;
@@ -80,8 +104,7 @@ pub struct CNAM {
 }
 
 pub fn parse_cnam(input: &[u8]) -> IResult<&[u8], CNAM> {
-    let (input, _) = tag("CNAM")(input)?;
-    let (input, _) = take(2u8)(input)?;
+    let (input, _) = parse_subheader_ignore_size(input, String::from("CNAM"))?;
     let (input, cnam_data) = take_while(|c: u8| c != 0)(input)?;
     let (input, _) = tag([0])(input)?;
 
@@ -96,13 +119,26 @@ pub struct SNAM {
 }
 
 pub fn parse_snam(input: &[u8]) -> IResult<&[u8], SNAM> {
-    let (input, _) = tag("SNAM")(input)?;
-    let (input, _) = take(2u8)(input)?;
+    let (input, _) = parse_subheader_ignore_size(input, String::from("SNAM"))?;
     let (input, snam_data) = take_while(|c: u8| c != 0)(input)?;
     let (input, _) = tag([0])(input)?;
 
     Ok((input, SNAM{
         author: String::from_utf8(snam_data.to_vec()).unwrap(),
+    }))
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct INTV {
+    pub internal_version: u32,
+}
+
+pub fn parse_intv(input: &[u8]) -> IResult<&[u8], INTV> {
+    let (input, _) = parse_subheader_ignore_size(input, String::from("INTV"))?;
+    let (input, internal_version) = le_u32(input)?;
+
+    Ok((input, INTV {
+        internal_version: internal_version,
     }))
 }
 
@@ -117,6 +153,7 @@ pub struct TES4 {
     pub hedr: HEDR,
     pub cnam: Option<CNAM>,
     pub snam: Option<SNAM>,
+    pub intv: Option<INTV>,
 }
 
 pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
@@ -130,16 +167,9 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
     let (input, unknown) = le_u16(input)?;
 
     let (input, hedr) = parse_hedr(input)?;
-    let (input, cnam_opt) = if let Ok((_input, cnam)) = parse_cnam(input) {
-        (_input, Some(cnam))
-    } else {
-        (input, None)
-    };
-    let (input, snam_opt) = if let Ok((_input, snam)) = parse_snam(input) {
-        (_input, Some(snam))
-    } else {
-        (input, None)
-    };
+    let (input, cnam_opt) = optional_record!(CNAM, parse_cnam, input);
+    let (input, snam_opt) = optional_record!(SNAM, parse_snam, input);
+    let (input, intv_opt) = optional_record!(INTV, parse_intv, input);
 
     println!("Next 8 bytes: {:x?}", &input[0..8]);
 
@@ -153,6 +183,7 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
         hedr: hedr,
         cnam: cnam_opt,
         snam: snam_opt,
+        intv: intv_opt,
     }))
 }
 
