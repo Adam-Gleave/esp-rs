@@ -2,30 +2,20 @@
 extern crate bitflags;
 extern crate nom;
 
+#[allow(non_snake_case)]
+mod TES4;
+
 use nom::{
     IResult,
-    do_parse,
-    many0,
-    preceded,
-    tag,
-    take,
-    take_while,
-    named,
     bytes::complete::tag,
     bytes::complete::take,
-    bytes::complete::take_while,
-    number::complete::le_f32,
-    number::complete::le_i32,
-    number::complete::le_u8,
     number::complete::le_u16,
     number::complete::le_u32,
-    number::complete::le_u64,
-    multi::count,
 };
 
-macro_rules! optional_record {
-    ($record:ty, $parser_fn:ident, $input:expr) => {{
-        let (input, opt) = if let Ok((_input, data)) = $parser_fn($input) {
+macro_rules! optional_subrecord {
+    ($subrecord:ty, $record:ident, $parser_fn:ident, $input:expr) => {{
+        let (input, opt) = if let Ok((_input, data)) = $record::$parser_fn($input) {
             (_input, Some(data))
         } else {
             ($input, None)
@@ -35,207 +25,25 @@ macro_rules! optional_record {
     }};
 }
 
-bitflags! {
-    #[derive(Default)]
-    pub struct TES4Flags: u32 {
-        const MASTER    = 0x00000001;
-        const LOCALIZED = 0x00000080;
-        const LIGHT     = 0x00000200;
-    }
-}
-
-pub fn parse_header_flags(input: &[u8]) -> IResult<&[u8], TES4Flags> {
-    let (input, val) = le_u32(input)?;
-    let flags = TES4Flags::from_bits(val).expect("Cannot parse TES4 header flags.");
-
-    Ok((input, flags))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct VersionControl {
-    pub day: u8,
-    pub month: u8,
-    pub last_user: u8,
-    pub curr_user: u8,
-}
-
-pub fn parse_version_control(input: &[u8]) -> IResult<&[u8], VersionControl> {
-    let (input, day) = le_u8(input)?;
-    let (input, month) = le_u8(input)?;
-    let (input, last_user) = le_u8(input)?;
-    let (input, curr_user) = le_u8(input)?;
-
-    Ok((input, VersionControl{
-        day: day,
-        month: month,
-        last_user: last_user,
-        curr_user: curr_user,
-    }))
-}
-
-pub fn parse_subheader(input: &[u8], code: String) -> IResult<&[u8], u16> {
-    let (input, _) = tag(code.as_str())(input)?;
-    let (input, size) = le_u16(input)?;
-
-    Ok((input, size))
-}
-
-pub fn parse_subheader_ignore_size(input: &[u8], code: String) -> IResult<&[u8], ()> {
-    let (input, _) = tag(code.as_str())(input)?;
-    let (input, _) = take(2u8)(input)?;
-
-    Ok((input, ()))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct HEDR {
-    pub version: f32,
-    pub num_records: i32,
-    pub next_obj_id: u32,
-}
-
-pub fn parse_hedr(input: &[u8]) -> IResult<&[u8], HEDR> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("HEDR"))?;
-    let (input, version) = le_f32(input)?;
-    let (input, num_records) = le_i32(input)?;
-    let (input, next_obj_id) = le_u32(input)?;
-
-    Ok((input, HEDR{
-        version: version,
-        num_records: num_records,
-        next_obj_id: next_obj_id,
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct CNAM {
-    pub author: String,
-}
-
-pub fn parse_cnam(input: &[u8]) -> IResult<&[u8], CNAM> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("CNAM"))?;
-    let (input, cnam_data) = take_while(|c: u8| c != 0)(input)?;
-    let (input, _) = tag([0])(input)?;
-
-    Ok((input, CNAM{
-        author: String::from_utf8(cnam_data.to_vec()).unwrap(),
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct SNAM {
-    pub author: String,
-}
-
-pub fn parse_snam(input: &[u8]) -> IResult<&[u8], SNAM> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("SNAM"))?;
-    let (input, snam_data) = take_while(|c: u8| c != 0)(input)?;
-    let (input, _) = tag([0])(input)?;
-
-    Ok((input, SNAM{
-        author: String::from_utf8(snam_data.to_vec()).unwrap(),
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct MAST {
-    pub master: String,
-}
-
-pub fn parse_mast(input: &[u8]) -> IResult<&[u8], Vec<MAST>> {
-    named!(mast_str, preceded!(take!(2u8), take_while!(|c: u8| c != 0)));
-    named!(mast_rec<&[u8], MAST>, do_parse!(
-        _tag: tag!("MAST") >> master: mast_str >> _spare: tag!([0]) >>
-        _data_tag: tag!("DATA") >> _sz: take!(2u8) >> _zero: le_u64 >> 
-        (MAST {
-            master: String::from_utf8(master.to_vec()).unwrap(),
-        })
-    ));
-    named!(mast_list<&[u8], Vec<MAST>>, many0!(mast_rec));
-
-    Ok(mast_list(input)?)
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct ONAM {
-    pub overrides: Vec<u32>,
-}
-
-pub fn parse_onam(input: &[u8]) -> IResult<&[u8], ONAM> {
-    let (input, size) = parse_subheader(input, String::from("ONAM"))?;
-    let (input, overrides) = count(le_u32, (size/4) as usize)(input)?;
-
-    Ok((input, ONAM{
-        overrides: overrides,
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct INTV {
-    pub internal_version: u32,
-}
-
-pub fn parse_intv(input: &[u8]) -> IResult<&[u8], INTV> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("INTV"))?;
-    let (input, internal_version) = le_u32(input)?;
-
-    Ok((input, INTV {
-        internal_version: internal_version,
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct INCC {
-    pub incc: u32,
-}
-
-pub fn parse_incc(input: &[u8]) -> IResult<&[u8], INCC> {
-    let (input, _) = parse_subheader_ignore_size(input, String::from("INCC"))?;
-    let (input, val) = le_u32(input)?;
-
-    Ok((input, INCC {
-        incc: val,
-    }))
-}
-
-#[derive(Debug, PartialEq, Default)]
-pub struct TES4 {
-    pub size: u32,
-    pub flags: TES4Flags,
-    pub vc: VersionControl,
-    pub version: u16,
-    pub unknown: u16,
-
-    pub hedr: HEDR,
-    pub cnam: Option<CNAM>,
-    pub snam: Option<SNAM>,
-    pub mast: Option<Vec<MAST>>,
-    pub onam: Option<ONAM>,
-    pub intv: Option<INTV>,
-    pub incc: Option<INCC>,
-}
-
-pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4> {
+pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4::TES4> {
     let (input, _) = tag("TES4")(input)?;
 
     let (input, size) = le_u32(input)?;
-    let (input, flags) = parse_header_flags(input)?;
+    let (input, flags) = TES4::parse_header_flags(input)?;
     let (input, _) = take(4u8)(input)?;
-    let (input, vc) = parse_version_control(input)?;
+    let (input, vc) = TES4::parse_version_control(input)?;
     let (input, version) = le_u16(input)?;
     let (input, unknown) = le_u16(input)?;
 
-    let (input, hedr) = parse_hedr(input)?;
-    let (input, cnam_opt) = optional_record!(CNAM, parse_cnam, input);
-    let (input, snam_opt) = optional_record!(SNAM, parse_snam, input);
-    let (input, mast_opt) = optional_record!(MAST, parse_mast, input);
-    let (input, onam_opt) = optional_record!(ONAM, parse_onam, input);
-    let (input, intv_opt) = optional_record!(INTV, parse_intv, input);
-    let (input, incc_opt) = optional_record!(INCC, parse_incc, input);
+    let (input, hedr) = TES4::parse_hedr(input)?;
+    let (input, cnam_opt) = optional_subrecord!(CNAM, TES4, parse_cnam, input);
+    let (input, snam_opt) = optional_subrecord!(SNAM, TES4, parse_snam, input);
+    let (input, mast_opt) = optional_subrecord!(MAST, TES4, parse_mast, input);
+    let (input, onam_opt) = optional_subrecord!(ONAM, TES4, parse_onam, input);
+    let (input, intv_opt) = optional_subrecord!(INTV, TES4, parse_intv, input);
+    let (input, incc_opt) = optional_subrecord!(INCC, TES4, parse_incc, input);
 
-    println!("Next 8 bytes: {:x?}", &input[0..8]);
-
-    Ok((input, TES4{
+    Ok((input, TES4::TES4{
         size: size,
         flags: flags,
         vc: vc,
