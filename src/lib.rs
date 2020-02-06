@@ -3,6 +3,7 @@ extern crate bitflags;
 extern crate nom;
 
 #[allow(non_snake_case)]
+mod common;
 mod TES4;
 
 use nom::{
@@ -31,7 +32,7 @@ pub fn parse_header(input: &[u8]) -> IResult<&[u8], TES4::TES4> {
     let (input, size) = le_u32(input)?;
     let (input, flags) = TES4::parse_header_flags(input)?;
     let (input, _) = take(4u8)(input)?;
-    let (input, vc) = TES4::parse_version_control(input)?;
+    let (input, vc) = common::parse_version_control(input)?;
     let (input, version) = le_u16(input)?;
     let (input, unknown) = le_u16(input)?;
 

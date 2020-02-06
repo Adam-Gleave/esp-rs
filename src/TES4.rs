@@ -7,11 +7,12 @@ use nom::{
     named,
     number::complete::le_f32,
     number::complete::le_i32,
-    number::complete::le_u8,
     number::complete::le_u16,
     number::complete::le_u32,
     number::complete::le_u64,
 };
+
+use common::VersionControl;
 
 bitflags! {
     #[derive(Default)]
@@ -24,16 +25,6 @@ bitflags! {
 
 named!(pub parse_header_flags<&[u8], TES4Flags>,
     do_parse!(val: le_u32 >> (TES4Flags::from_bits(val).unwrap()))
-);
-
-named!(pub parse_version_control<&[u8], VersionControl>, 
-    do_parse!(day: le_u8 >> month: le_u8 >> last_user: le_u8 >> curr_user: le_u8 >>
-    (VersionControl {
-        day: day,
-        month: month,
-        last_user: last_user,
-        curr_user: curr_user,
-    }))
 );
 
 named!(pub parse_hedr<&[u8], HEDR>,
@@ -99,14 +90,6 @@ named!(pub parse_incc<&[u8], INCC>,
         incc: incc,
     }))
 );
-
-#[derive(Debug, PartialEq, Default)]
-pub struct VersionControl {
-    pub day: u8,
-    pub month: u8,
-    pub last_user: u8,
-    pub curr_user: u8,
-}
 
 #[derive(Debug, PartialEq, Default)]
 pub struct HEDR {
